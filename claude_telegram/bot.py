@@ -154,6 +154,7 @@ class Bot:
         self._current_runner[chat_id] = self.runner
         cost = None
         captured_session = state.session_id
+        error: Exception | None = None
         try:
             async for ev in self.runner.run(prompt=text, session_id=state.session_id, cwd=state.cwd):
                 if ev.kind == "session" and ev.data.get("session_id"):
@@ -163,10 +164,29 @@ class Bot:
                     if ev.data.get("session_id"):
                         captured_session = ev.data["session_id"]
                 await renderer.handle(ev)
-            await renderer.finalize()
+        except Exception as e:
+            error = e
         finally:
             self._current_runner.pop(chat_id, None)
+            if error is not None:
+                try:
+                    await sink.send(f"⚠️ runner error: {type(error).__name__}: {error}")
+                except Exception:
+                    pass
+            else:
+                try:
+                    await renderer.finalize()
+                except Exception:
+                    pass
         if captured_session and captured_session != state.session_id:
             self.state.set_session(chat_id, captured_session)
         self._last_turn[chat_id] = LastTurn(cost=cost)
-        self.logger.write("claude", chat_id=chat_id, details={"cost_usd": cost, "session_id": captured_session})
+        self.logger.write(
+            "claude",
+            chat_id=chat_id,
+            details={
+                "cost_usd": cost,
+                "session_id": captured_session,
+                "error": f"{type(error).__name__}: {error}" if error else None,
+            },
+        )

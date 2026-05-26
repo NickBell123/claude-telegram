@@ -18,6 +18,7 @@ class Config:
     rate_limit_per_hour: int = 60
     edit_min_interval_s: float = 1.2
     max_telegram_chars: int = 3900
+    claude_bin: str = "claude"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -37,4 +38,5 @@ class Config:
             allowed_user_id=allowed,
             default_chat_id=req("DEFAULT_CHAT_ID"),
             push_token=req("PUSH_TOKEN"),
+            claude_bin=os.environ.get("CLAUDE_BIN", "claude"),
         )

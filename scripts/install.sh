@@ -22,6 +22,11 @@ if [ ! -f "$ENV_FILE" ]; then
     read -r -p "Telegram bot token (from @BotFather): " TOKEN
     read -r -p "Your Telegram user ID (from @userinfobot): " USER_ID
     PUSH_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    CLAUDE_BIN="$(command -v claude || true)"
+    if [ -z "$CLAUDE_BIN" ]; then
+        echo "WARNING: 'claude' not on PATH; set CLAUDE_BIN in $ENV_FILE manually"
+        CLAUDE_BIN="claude"
+    fi
     umask 077
     cat > "$ENV_FILE" <<EOF
 TELEGRAM_BOT_TOKEN=$TOKEN
@@ -29,6 +34,7 @@ ALLOWED_USER_ID=$USER_ID
 DEFAULT_CHAT_ID=$USER_ID
 PUSH_TOKEN=$PUSH_TOKEN
 PUSH_URL=http://127.0.0.1:8787/push
+CLAUDE_BIN=$CLAUDE_BIN
 EOF
     chmod 600 "$ENV_FILE"
     echo "wrote $ENV_FILE (chmod 600)"
