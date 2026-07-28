@@ -2,10 +2,18 @@
 
 Telegram bridge to the `claude` CLI. Talk to Claude Code from your phone with full skill/MCP parity. Bonus: a localhost push endpoint so cron jobs can DM you.
 
-## Install (Aspire host)
+Each message spawns `claude -p --resume <session> --output-format stream-json` as a subprocess and streams the output back into a live-edited Telegram message. Wrapping the real CLI — rather than rebuilding on the Agent SDK — means every skill, MCP server, and hook you already have configured just works, with no duplicated config.
+
+## Requirements
+
+- Linux with a systemd user session (`systemctl --user`)
+- Python 3.12+
+- The [`claude` CLI](https://claude.com/claude-code), installed and authenticated
+
+## Install
 
 ```bash
-git clone <repo> ~/claude-telegram
+git clone https://github.com/NickBell123/claude-telegram ~/claude-telegram
 cd ~/claude-telegram
 ./scripts/install.sh
 ```
@@ -44,8 +52,21 @@ journalctl --user -u claude-telegram -f
 tail -f ~/.claude-telegram/log.jsonl
 ```
 
+## Development
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/pytest
+```
+
 ## Safety
 
 - Only the configured `ALLOWED_USER_ID` can talk to the bot. Other users are dropped silently.
 - The push endpoint binds to `127.0.0.1` only and requires a bearer token.
 - `claude` runs with `--dangerously-skip-permissions`. Same blast radius as you running Claude Code interactively. If your phone is lost, revoke the bot token via @BotFather.
+- Built for a single operator. One `claude` subprocess runs at a time per chat; `/stop` targets the in-flight turn.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

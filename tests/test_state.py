@@ -4,9 +4,9 @@ from claude_telegram.state import StateStore, ChatState
 
 def test_set_and_get_roundtrip(tmp_path: Path):
     store = StateStore(tmp_path / "state.json")
-    store.set("123", ChatState(session_id="abc", cwd="/home/nick"))
+    store.set("123", ChatState(session_id="abc", cwd="/work/proj"))
     again = StateStore(tmp_path / "state.json")
-    assert again.get("123") == ChatState(session_id="abc", cwd="/home/nick")
+    assert again.get("123") == ChatState(session_id="abc", cwd="/work/proj")
 
 
 def test_get_missing_returns_default_cwd(tmp_path: Path):

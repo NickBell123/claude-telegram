@@ -23,7 +23,7 @@ def _fake_claude_script(tmp_path: Path, events: list[dict]) -> Path:
 @pytest.mark.asyncio
 async def test_yields_session_id_text_and_result(tmp_path: Path):
     events = [
-        {"type": "system", "subtype": "init", "session_id": "sess-1", "cwd": "/home/nick"},
+        {"type": "system", "subtype": "init", "session_id": "sess-1", "cwd": "/work/proj"},
         {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}},
         {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]}},
         {"type": "result", "subtype": "success", "total_cost_usd": 0.0042, "session_id": "sess-1"},
@@ -31,7 +31,7 @@ async def test_yields_session_id_text_and_result(tmp_path: Path):
     script = _fake_claude_script(tmp_path, events)
     runner = ClaudeRunner(claude_cmd=[sys.executable, str(script)])
     out = []
-    async for ev in runner.run(prompt="hi", session_id=None, cwd="/home/nick"):
+    async for ev in runner.run(prompt="hi", session_id=None, cwd=str(tmp_path)):
         out.append(ev)
     kinds = [e.kind for e in out]
     assert kinds == ["session", "text", "tool_use", "result"]

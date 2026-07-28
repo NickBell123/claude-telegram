@@ -13,7 +13,8 @@ class ChatState:
 
 
 class StateStore:
-    def __init__(self, path: Path, default_cwd: str = "/home/nick"):
+    def __init__(self, path: Path, default_cwd: str | None = None):
+        default_cwd = default_cwd or os.path.expanduser("~")
         self.path = Path(path)
         self.default_cwd = default_cwd
         self._data = self._load()

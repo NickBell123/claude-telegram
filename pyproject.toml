@@ -1,7 +1,15 @@
 [project]
 name = "claude-telegram"
 version = "0.1.0"
+description = "Telegram bridge to the Claude Code CLI, with a localhost push endpoint for cron alerts"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Nick Bell" }]
+keywords = ["claude", "claude-code", "telegram", "bot", "cli"]
+
+[project.urls]
+Homepage = "https://github.com/NickBell123/claude-telegram"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
