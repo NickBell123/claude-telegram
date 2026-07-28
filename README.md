@@ -39,6 +39,10 @@ echo "BTC +2.1%" | tg-push
 tg-push --title "Morning brief" --file /tmp/brief.md
 ```
 
+`examples/morning-brief.sh` is a worked example: a cron job that runs `claude -p`
+headless and delivers the result to Telegram, including the PATH handling cron
+needs and a failure path so a broken job doesn't fail silently.
+
 ## Files
 
 - `~/.claude-telegram/env` — config (chmod 600)

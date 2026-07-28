@@ -2,16 +2,16 @@
 
 **Date:** 2026-05-26
 **Status:** Approved for implementation planning
-**Host:** Aspire (`/home/nick`)
+**Host:** an always-on Linux box with a systemd user session
 
 ## Goal
 
-A Telegram bot that bridges to Claude Code with full parity — every skill, MCP server, hook, and setting available on the Aspire host is available from Nick's phone. Plus a localhost push endpoint so existing crons/scripts can send proactive messages to Telegram.
+A Telegram bot that bridges to Claude Code with full parity — every skill, MCP server, hook, and setting available on the host is available from your phone. Plus a localhost push endpoint so existing crons/scripts can send proactive messages to Telegram.
 
 ## Non-goals
 
 - Multi-user support beyond a single Telegram user ID
-- Webhook deployment (Aspire is behind NAT; long-polling only)
+- Webhook deployment (the host is behind NAT; long-polling only)
 - Browser/voice/file-attachment handling in v1 (text only)
 - Persisted memory beyond Claude's own session resume mechanism
 
@@ -35,8 +35,8 @@ Single Python process containing:
 - **PushServer** — `aiohttp` on `127.0.0.1:8787`, bearer-token auth.
 - **ClaudeRunner** — shared component owning sessions and spawning the `claude` CLI.
 
-Project root: `/home/nick/claude-telegram/`.
-Deployed as user-systemd unit `claude-telegram.service` with `loginctl enable-linger nick`.
+Project root: `~/claude-telegram/`.
+Deployed as user-systemd unit `claude-telegram.service` with `loginctl enable-linger $USER`.
 
 ## Components
 
@@ -66,7 +66,7 @@ Deployed as user-systemd unit `claude-telegram.service` with `loginctl enable-li
 - Usage:
   ```bash
   echo "deploy finished" | tg-push
-  tg-push --title "Pionex daily" --file /tmp/brief.md
+  tg-push --title "Daily brief" --file /tmp/brief.md
   ```
 
 ## Session lifecycle
@@ -75,7 +75,7 @@ State at `~/.claude-telegram/state.json`:
 ```json
 {
   "chats": {
-    "<chat_id>": { "session_id": "abc123", "cwd": "/home/nick" }
+    "<chat_id>": { "session_id": "abc123", "cwd": "$HOME" }
   }
 }
 ```
@@ -87,7 +87,7 @@ State at `~/.claude-telegram/state.json`:
 4. Send placeholder Telegram message (`⚡ thinking…`).
 5. As stream-json events arrive, accumulate assistant text; edit the placeholder at most every 1.2s.
 6. When accumulated text > 3900 chars, finalize current message and start a new one.
-7. Tool-use events render inline: `> 🔧 Bash: ls /home/nick`.
+7. Tool-use events render inline: `> 🔧 Bash: ls $HOME`.
 8. Final message marked with `✅` plus token/cost summary from the final event.
 
 **Commands:**
@@ -104,7 +104,7 @@ State at `~/.claude-telegram/state.json`:
 `~/.claude-telegram/env` (chmod 600):
 ```
 TELEGRAM_BOT_TOKEN=...           # from @BotFather
-ALLOWED_USER_ID=123456789        # Nick's numeric Telegram ID (via @userinfobot)
+ALLOWED_USER_ID=123456789        # your numeric Telegram ID (via @userinfobot)
 DEFAULT_CHAT_ID=123456789        # usually same as above
 PUSH_TOKEN=<random 32 bytes hex> # generated at install
 ```
@@ -114,8 +114,8 @@ PUSH_TOKEN=<random 32 bytes hex> # generated at install
 Layered defenses, in order of precedence:
 
 1. **Telegram auth gate** — drop updates from any user ID other than `ALLOWED_USER_ID`. Silent drop avoids leaking the bot's existence.
-2. **Push endpoint** — bound to `127.0.0.1` only + bearer token. Anything reaching it already has localhost access to Aspire.
-3. **Subprocess isolation** — Claude runs as Nick's user with `--dangerously-skip-permissions`. Same blast radius as Nick running Claude Code interactively. Accepted tradeoff: this is the "GOD MODE" the user asked for; documented here.
+2. **Push endpoint** — bound to `127.0.0.1` only + bearer token. Anything reaching it already has localhost access to the host.
+3. **Subprocess isolation** — Claude runs as your user with `--dangerously-skip-permissions`. Same blast radius as you running Claude Code interactively. Accepted tradeoff, documented here rather than hidden.
 4. **Rate limit** — max 60 inbound messages/hour per chat as a kill switch against runaway loops or a stolen phone. Excess logged and dropped.
 5. **`/stop` command** — interrupts the current turn via SIGTERM.
 
@@ -129,9 +129,9 @@ Each `claude` entry records duration and cost from the final stream-json event.
 
 ## Deployment
 
-- Python venv at `/home/nick/claude-telegram/.venv`.
+- Python venv at `~/claude-telegram/.venv`.
 - User systemd unit at `~/.config/systemd/user/claude-telegram.service`.
-- `loginctl enable-linger nick` so the service survives logout.
+- `loginctl enable-linger $USER` so the service survives logout.
 - `install.sh` script:
   1. Creates venv, installs requirements.
   2. Prompts for `TELEGRAM_BOT_TOKEN` and `ALLOWED_USER_ID`.

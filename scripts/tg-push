@@ -6,7 +6,7 @@ override with $TG_PUSH_ENV_FILE). PUSH_URL defaults to http://127.0.0.1:8787/pus
 
 Usage:
   echo "msg" | tg-push
-  tg-push --title "Pionex daily" --file /tmp/brief.md
+  tg-push --title "Daily brief" --file /tmp/brief.md
   tg-push --chat-id 9999 "inline text"
 """
 import argparse

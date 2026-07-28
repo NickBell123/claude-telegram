@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Telegram bot on the Aspire host that bridges Telegram messages to the `claude` CLI (full Claude Code parity) and exposes a localhost HTTP endpoint for cron jobs to push proactive messages.
+**Goal:** Build a Telegram bot on the host that bridges Telegram messages to the `claude` CLI (full Claude Code parity) and exposes a localhost HTTP endpoint for cron jobs to push proactive messages.
 
 **Architecture:** Single Python asyncio process. `python-telegram-bot` long-polls Telegram and gates updates to a single allowed user ID. Each message spawns `claude -p --resume <session_id> --output-format stream-json --dangerously-skip-permissions` as a subprocess; stdout is parsed line-by-line and rendered to Telegram by editing one placeholder message live (≤1 edit/1.2s, split at 3900 chars). An `aiohttp` server on `127.0.0.1:8787` accepts bearer-token-authenticated POSTs and forwards them as Telegram messages. State persists at `~/.claude-telegram/`. Deployed as a user systemd unit.
 
@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-26-claude-telegram-design.md`
 
-**File structure (all paths relative to `/home/nick/claude-telegram/`):**
+**File structure (all paths relative to `~/claude-telegram/`):**
 ```
 claude_telegram/
   __init__.py
@@ -97,7 +97,7 @@ testpaths = ["tests"]
 - [ ] **Step 5: Create venv and install**
 
 ```bash
-cd /home/nick/claude-telegram
+cd ~/claude-telegram
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt pytest pytest-asyncio
 ```
@@ -244,9 +244,9 @@ from claude_telegram.state import StateStore, ChatState
 
 def test_set_and_get_roundtrip(tmp_path: Path):
     store = StateStore(tmp_path / "state.json")
-    store.set("123", ChatState(session_id="abc", cwd="/home/nick"))
+    store.set("123", ChatState(session_id="abc", cwd="$HOME"))
     again = StateStore(tmp_path / "state.json")
-    assert again.get("123") == ChatState(session_id="abc", cwd="/home/nick")
+    assert again.get("123") == ChatState(session_id="abc", cwd="$HOME")
 
 
 def test_get_missing_returns_default_cwd(tmp_path: Path):
@@ -294,7 +294,7 @@ class ChatState:
 
 
 class StateStore:
-    def __init__(self, path: Path, default_cwd: str = "/home/nick"):
+    def __init__(self, path: Path, default_cwd: str = "$HOME"):
         self.path = Path(path)
         self.default_cwd = default_cwd
         self._data = self._load()
@@ -562,7 +562,7 @@ def _fake_claude_script(tmp_path: Path, events: list[dict]) -> Path:
 @pytest.mark.asyncio
 async def test_yields_session_id_text_and_result(tmp_path: Path):
     events = [
-        {"type": "system", "subtype": "init", "session_id": "sess-1", "cwd": "/home/nick"},
+        {"type": "system", "subtype": "init", "session_id": "sess-1", "cwd": "$HOME"},
         {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}},
         {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]}},
         {"type": "result", "subtype": "success", "total_cost_usd": 0.0042, "session_id": "sess-1"},
@@ -570,7 +570,7 @@ async def test_yields_session_id_text_and_result(tmp_path: Path):
     script = _fake_claude_script(tmp_path, events)
     runner = ClaudeRunner(claude_cmd=[sys.executable, str(script)])
     out = []
-    async for ev in runner.run(prompt="hi", session_id=None, cwd="/home/nick"):
+    async for ev in runner.run(prompt="hi", session_id=None, cwd="$HOME"):
         out.append(ev)
     kinds = [e.kind for e in out]
     assert kinds == ["session", "text", "tool_use", "result"]
@@ -1475,7 +1475,7 @@ override with $TG_PUSH_ENV_FILE). PUSH_URL defaults to http://127.0.0.1:8787/pus
 
 Usage:
   echo "msg" | tg-push
-  tg-push --title "Pionex daily" --file /tmp/brief.md
+  tg-push --title "Daily brief" --file /tmp/brief.md
   tg-push --chat-id 9999 "inline text"
 """
 import argparse
@@ -1755,7 +1755,7 @@ git add -A && git commit -m "feat: systemd unit + install script"
 
 Telegram bridge to the `claude` CLI. Talk to Claude Code from your phone with full skill/MCP parity. Bonus: a localhost push endpoint so cron jobs can DM you.
 
-## Install (Aspire host)
+## Install
 
 ```bash
 git clone <repo> ~/claude-telegram
@@ -1817,4 +1817,4 @@ git add README.md && git commit -m "docs: README"
 - Spec coverage: all spec sections (architecture, components, sessions, commands, push, config, safety, logging, deployment, testing) have at least one task.
 - No placeholders ("TBD", "implement later") in any task.
 - Type consistency: `chat_id` is a string everywhere (`StateStore`, push payload, sink, bot). `session_id` is `Optional[str]`. `RunnerEvent.data` is `dict`. `MessageSink` protocol is the only interface between StreamRenderer and Telegram.
-- The `Bot` class is glue: its protected methods are exercised end-to-end in task 12 via the runner→renderer path. Pure helpers (`is_authorized`, `parse_command`) get unit tests. Live Telegram smoke-testing happens after `install.sh` runs on Aspire.
+- The `Bot` class is glue: its protected methods are exercised end-to-end in task 12 via the runner→renderer path. Pure helpers (`is_authorized`, `parse_command`) get unit tests. Live Telegram smoke-testing happens after `install.sh` runs on the host.
