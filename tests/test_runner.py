@@ -57,3 +57,42 @@ async def test_passes_resume_flag(tmp_path: Path):
     argv = out[-1].data["raw"]["argv"]
     assert "--resume" in argv
     assert "abc" in argv
+
+
+@pytest.mark.asyncio
+async def test_nonzero_exit_yields_error_event(tmp_path: Path):
+    """A crashing CLI surfaces its exit code and stderr instead of failing silently."""
+    script = tmp_path / "crash.py"
+    script.write_text(textwrap.dedent("""
+        import json, sys
+        print(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "partial"}]}}), flush=True)
+        sys.stderr.write("boom: credit balance too low\\n")
+        sys.exit(3)
+        """).strip())
+    runner = ClaudeRunner(claude_cmd=[sys.executable, str(script)])
+    out = [ev async for ev in runner.run(prompt="hi", session_id=None, cwd=str(tmp_path))]
+    assert out[0].kind == "text"
+    assert out[-1].kind == "error"
+    assert out[-1].data["returncode"] == 3
+    assert "credit balance too low" in out[-1].data["stderr"]
+
+
+@pytest.mark.asyncio
+async def test_early_close_reaps_child_and_does_not_raise(tmp_path: Path):
+    """Abandoning the stream mid-turn must kill the child, not orphan or explode."""
+    script = tmp_path / "slow.py"
+    script.write_text(textwrap.dedent("""
+        import json, sys, time
+        print(json.dumps({"type": "system", "subtype": "init", "session_id": "s1"}), flush=True)
+        time.sleep(30)
+        """).strip())
+    runner = ClaudeRunner(claude_cmd=[sys.executable, str(script)])
+    agen = runner.run(prompt="hi", session_id=None, cwd=str(tmp_path))
+    first = await agen.__anext__()
+    assert first.kind == "session"
+
+    # Closing mid-iteration used to hit "async generator ignored GeneratorExit".
+    await asyncio.wait_for(agen.aclose(), timeout=5)
+
+    assert runner._proc is not None
+    assert runner._proc.returncode is not None, "child process was left running"

@@ -1,3 +1,4 @@
+import hmac
 from typing import Awaitable, Callable
 
 from aiohttp import web
@@ -19,7 +20,8 @@ def build_app(
 ) -> web.Application:
     async def handle_push(request: web.Request) -> web.Response:
         auth = request.headers.get("Authorization", "")
-        if auth != f"Bearer {push_token}":
+        # Constant-time compare so a caller can't time-probe the token byte by byte.
+        if not hmac.compare_digest(auth, f"Bearer {push_token}"):
             return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
         try:
             body = await request.json()

@@ -47,23 +47,24 @@ class StreamRenderer:
             return
         # If adding would overflow, finalize current message and start a fresh one.
         if len(self._current_text) + len(addition) > self.max_chars:
-            await self._flush(force=True)
+            await self._flush()
             self._current_msg_id = await self.sink.send(PLACEHOLDER)
             self._current_text = ""
             self._last_edit_at = self.now_fn()
         self._current_text += addition
         # Throttled edit.
         if self.now_fn() - self._last_edit_at >= self.min_edit_interval_s:
-            await self._flush(force=False)
+            await self._flush()
 
     async def finalize(self) -> None:
         suffix = "\n\n✅"
         if self._final_cost is not None:
             suffix += f" (${self._final_cost:.4f})"
         self._current_text += suffix
-        await self._flush(force=True)
+        await self._flush()
 
-    async def _flush(self, force: bool) -> None:
+    async def _flush(self) -> None:
+        """Write the buffer to Telegram. Callers decide when; throttling lives at the call site."""
         if self._current_msg_id is None:
             return
         text = self._current_text or PLACEHOLDER

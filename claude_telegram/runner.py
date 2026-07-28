@@ -62,11 +62,21 @@ class ClaudeRunner:
                     continue
                 for normalized in self._normalize(ev):
                     yield normalized
-        finally:
-            rc = await proc.wait()
-            if rc != 0:
-                err = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
-                yield RunnerEvent(kind="error", data={"returncode": rc, "stderr": err})
+        except BaseException:
+            # The consumer broke out, raised, or was cancelled (GeneratorExit).
+            # Reap the child so we don't orphan a claude process — but never
+            # yield during cleanup: a yield here would mask the real exception
+            # with "async generator ignored GeneratorExit".
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
+            raise
+
+        # Normal completion: stdout hit EOF, so it is safe to yield again.
+        rc = await proc.wait()
+        if rc != 0:
+            err = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
+            yield RunnerEvent(kind="error", data={"returncode": rc, "stderr": err})
 
     def _normalize(self, ev: dict) -> list[RunnerEvent]:
         t = ev.get("type")
