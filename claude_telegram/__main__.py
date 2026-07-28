@@ -14,8 +14,15 @@ from claude_telegram.runner import ClaudeRunner
 from claude_telegram.state import StateStore
 
 
-async def _main() -> None:
+def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    # httpx logs every request URL at INFO, and the Telegram API carries the bot
+    # token in the path — that would write the token to the journal in plaintext.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+async def _main() -> None:
+    configure_logging()
     cfg = Config.from_env()
     state_dir = Path(cfg.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
