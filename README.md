@@ -1,5 +1,8 @@
 # claude-telegram
 
+[![tests](https://github.com/NickBell123/claude-telegram/actions/workflows/tests.yml/badge.svg)](https://github.com/NickBell123/claude-telegram/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Telegram bridge to the `claude` CLI. Talk to Claude Code from your phone with full skill/MCP parity. Bonus: a localhost push endpoint so cron jobs can DM you.
 
 Each message spawns `claude -p --resume <session> --output-format stream-json` as a subprocess and streams the output back into a live-edited Telegram message. Wrapping the real CLI — rather than rebuilding on the Agent SDK — means every skill, MCP server, and hook you already have configured just works, with no duplicated config.
