@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -65,13 +65,15 @@ class Bot:
         self,
         config: Config,
         state: StateStore,
-        runner: ClaudeRunner,
+        runner_factory: Callable[[], ClaudeRunner],
         logger: JsonlLogger,
         limiter: SlidingWindowLimiter,
     ):
         self.config = config
         self.state = state
-        self.runner = runner
+        # A fresh runner per turn: each owns its own subprocess, so /stop in one
+        # chat cannot terminate another chat's in-flight turn.
+        self.runner_factory = runner_factory
         self.logger = logger
         self.limiter = limiter
         self._in_flight: dict[str, asyncio.Lock] = {}
@@ -151,12 +153,13 @@ class Bot:
             min_edit_interval_s=self.config.edit_min_interval_s,
         )
         await renderer.start_placeholder()
-        self._current_runner[chat_id] = self.runner
+        runner = self.runner_factory()
+        self._current_runner[chat_id] = runner
         cost = None
         captured_session = state.session_id
         error: Exception | None = None
         try:
-            async for ev in self.runner.run(prompt=text, session_id=state.session_id, cwd=state.cwd):
+            async for ev in runner.run(prompt=text, session_id=state.session_id, cwd=state.cwd):
                 if ev.kind == "session" and ev.data.get("session_id"):
                     captured_session = ev.data["session_id"]
                 if ev.kind == "result":

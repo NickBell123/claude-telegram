@@ -22,8 +22,13 @@ async def _main() -> None:
     state = StateStore(state_dir / "state.json")
     logger = JsonlLogger(state_dir / "log.jsonl")
     limiter = SlidingWindowLimiter(max_events=cfg.rate_limit_per_hour, window_seconds=3600)
-    runner = ClaudeRunner(claude_cmd=[cfg.claude_bin])
-    bot = Bot(config=cfg, state=state, runner=runner, logger=logger, limiter=limiter)
+    bot = Bot(
+        config=cfg,
+        state=state,
+        runner_factory=lambda: ClaudeRunner(claude_cmd=[cfg.claude_bin]),
+        logger=logger,
+        limiter=limiter,
+    )
 
     async def push_send(chat_id: str, text: str) -> int:
         return await bot.send(chat_id, text)

@@ -11,11 +11,18 @@ class RunnerEvent:
 
 
 class ClaudeRunner:
-    """Spawns the claude CLI and yields normalized events from its stream-json output."""
+    """
+    Spawns the claude CLI and yields normalized events from its stream-json output.
+
+    One instance owns at most one subprocess, so `terminate()` can only ever kill
+    the turn this instance started. Create a fresh runner per turn — see
+    `Bot._run_turn` — rather than sharing one across concurrent chats.
+    """
 
     def __init__(self, claude_cmd: list[str] | None = None):
         # Allow override for tests; default is the real CLI.
         self.claude_cmd = claude_cmd or ["claude"]
+        self._proc: asyncio.subprocess.Process | None = None
 
     def _build_argv(self, prompt: str, session_id: Optional[str]) -> list[str]:
         argv = list(self.claude_cmd) + [
@@ -88,6 +95,6 @@ class ClaudeRunner:
         return []
 
     def terminate(self) -> None:
-        proc = getattr(self, "_proc", None)
+        proc = self._proc
         if proc and proc.returncode is None:
             proc.terminate()
