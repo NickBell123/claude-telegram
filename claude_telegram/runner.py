@@ -10,6 +10,28 @@ class RunnerEvent:
     data: dict
 
 
+# Keep the tail of stderr for error reporting without growing without bound.
+MAX_STDERR_BYTES = 64 * 1024
+
+
+async def _drain_stderr(stream: asyncio.StreamReader, sink: list[bytes]) -> None:
+    """
+    Read stderr continuously so the child never blocks on a full pipe.
+
+    Reading must not stop once the cap is reached — that is what causes the
+    hang — so keep consuming and discard the oldest chunks instead.
+    """
+    total = 0
+    while True:
+        chunk = await stream.read(4096)
+        if not chunk:
+            return
+        sink.append(chunk)
+        total += len(chunk)
+        while total > MAX_STDERR_BYTES and len(sink) > 1:
+            total -= len(sink.pop(0))
+
+
 class ClaudeRunner:
     """
     Spawns the claude CLI and yields normalized events from its stream-json output.
@@ -49,6 +71,15 @@ class ClaudeRunner:
             stderr=asyncio.subprocess.PIPE,
         )
         self._proc = proc
+        # Drain stderr in the background for the whole life of the process. If
+        # nothing reads it, a chatty child fills the pipe buffer, blocks on
+        # write, and the turn hangs forever with no output and no error.
+        stderr_chunks: list[bytes] = []
+        stderr_task = (
+            asyncio.create_task(_drain_stderr(proc.stderr, stderr_chunks))
+            if proc.stderr is not None
+            else None
+        )
         try:
             assert proc.stdout is not None
             async for line in proc.stdout:
@@ -70,12 +101,16 @@ class ClaudeRunner:
             if proc.returncode is None:
                 proc.kill()
             await proc.wait()
+            if stderr_task is not None:
+                stderr_task.cancel()
             raise
 
         # Normal completion: stdout hit EOF, so it is safe to yield again.
         rc = await proc.wait()
+        if stderr_task is not None:
+            await stderr_task
         if rc != 0:
-            err = (await proc.stderr.read()).decode("utf-8", "replace") if proc.stderr else ""
+            err = b"".join(stderr_chunks).decode("utf-8", "replace")
             yield RunnerEvent(kind="error", data={"returncode": rc, "stderr": err})
 
     def _normalize(self, ev: dict) -> list[RunnerEvent]:

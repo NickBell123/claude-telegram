@@ -96,3 +96,53 @@ async def test_early_close_reaps_child_and_does_not_raise(tmp_path: Path):
 
     assert runner._proc is not None
     assert runner._proc.returncode is not None, "child process was left running"
+
+
+@pytest.mark.asyncio
+async def test_chatty_stderr_does_not_hang_the_turn(tmp_path: Path):
+    """
+    A child that writes more to stderr than the pipe buffer holds must still
+    complete. Without a concurrent drain the child blocks on write and the
+    turn never finishes.
+    """
+    script = tmp_path / "chatty.py"
+    script.write_text(textwrap.dedent("""
+        import json, sys
+        sys.stderr.write("x" * (512 * 1024))
+        sys.stderr.flush()
+        print(json.dumps({"type": "result", "subtype": "success", "total_cost_usd": 0.5, "session_id": "s1"}), flush=True)
+        """).strip())
+    runner = ClaudeRunner(claude_cmd=[sys.executable, str(script)])
+
+    async def collect():
+        return [ev async for ev in runner.run(prompt="hi", session_id=None, cwd=str(tmp_path))]
+
+    out = await asyncio.wait_for(collect(), timeout=15)
+    assert [e.kind for e in out] == ["result"]
+    assert out[0].data["cost_usd"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_stderr_tail_is_kept_and_bounded(tmp_path: Path):
+    """On failure we report the tail of stderr, capped so a noisy child can't eat memory."""
+    script = tmp_path / "noisy_crash.py"
+    script.write_text(textwrap.dedent("""
+        import sys
+        sys.stderr.write("y" * (256 * 1024))
+        sys.stderr.write("FINAL: session limit reached\\n")
+        sys.stderr.flush()
+        sys.exit(2)
+        """).strip())
+    runner = ClaudeRunner(claude_cmd=[sys.executable, str(script)])
+    out = await asyncio.wait_for(
+        _collect(runner, tmp_path), timeout=15
+    )
+    assert out[-1].kind == "error"
+    assert out[-1].data["returncode"] == 2
+    stderr = out[-1].data["stderr"]
+    assert "FINAL: session limit reached" in stderr, "tail of stderr should survive"
+    assert len(stderr) <= 128 * 1024, "stderr buffer should stay bounded"
+
+
+async def _collect(runner: ClaudeRunner, tmp_path: Path) -> list[RunnerEvent]:
+    return [ev async for ev in runner.run(prompt="hi", session_id=None, cwd=str(tmp_path))]
