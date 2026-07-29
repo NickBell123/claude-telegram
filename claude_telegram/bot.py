@@ -1,4 +1,5 @@
 import asyncio
+import os
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -125,8 +126,12 @@ class Bot:
             if not arg:
                 await self.app.bot.send_message(chat_id=chat_id, text="usage: /cd <path>")
                 return
-            self.state.set_cwd(chat_id, arg)
-            await self.app.bot.send_message(chat_id=chat_id, text=f"📁 cwd set to {arg}")
+            if "\n" in arg or "\r" in arg:
+                await self.app.bot.send_message(chat_id=chat_id, text="send one command per message")
+                return
+            cwd = os.path.expanduser(arg)
+            self.state.set_cwd(chat_id, cwd)
+            await self.app.bot.send_message(chat_id=chat_id, text=f"📁 cwd set to {cwd}")
         elif cmd == "cwd":
             s = self.state.get(chat_id)
             await self.app.bot.send_message(chat_id=chat_id, text=f"📁 {s.cwd}")

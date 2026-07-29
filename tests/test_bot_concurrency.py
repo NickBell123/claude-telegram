@@ -114,6 +114,30 @@ async def test_each_turn_gets_its_own_runner(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_cd_rejects_multiline_argument_without_changing_cwd(tmp_path: Path):
+    bot = _build_bot(tmp_path, [])
+    original_cwd = bot.state.get("chat-a").cwd
+
+    await bot._handle_command("chat-a", "cd", "~/claude-telegram\n/cwd")
+
+    assert bot.state.get("chat-a").cwd == original_cwd
+    assert bot.app.bot.sent[-1][1] == "send one command per message"
+
+
+@pytest.mark.asyncio
+async def test_cd_expands_home_directory(tmp_path: Path, monkeypatch):
+    bot = _build_bot(tmp_path, [])
+    project = tmp_path / "claude-telegram"
+    project.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    await bot._handle_command("chat-a", "cd", "~/claude-telegram")
+
+    assert bot.state.get("chat-a").cwd == str(project)
+    assert bot.app.bot.sent[-1][1] == f"📁 cwd set to {project}"
+
+
+@pytest.mark.asyncio
 async def test_stop_with_nothing_running_is_a_noop(tmp_path: Path):
     bot = _build_bot(tmp_path, [])
     await bot._handle_command("chat-a", "stop", "")
