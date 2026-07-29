@@ -5,7 +5,37 @@
 
 Telegram bridge to the `claude` CLI. Talk to Claude Code from your phone with full skill/MCP parity. Bonus: a localhost push endpoint so cron jobs can DM you.
 
-Each message spawns `claude -p --resume <session> --output-format stream-json` as a subprocess and streams the output back into a live-edited Telegram message. Wrapping the real CLI — rather than rebuilding on the Agent SDK — means every skill, MCP server, and hook you already have configured just works, with no duplicated config.
+## 30-second overview
+
+`claude-telegram` is a small Python service for a single operator. It polls Telegram, accepts messages only from one configured user ID, runs the real `claude` CLI as a subprocess, and streams Claude Code's `stream-json` output back by editing Telegram messages in place. It also exposes a bearer-protected localhost `/push` endpoint so scripts and cron jobs can send Telegram notifications through the same bot.
+
+The bridge deliberately wraps the installed CLI instead of reimplementing Claude Code behavior. That keeps the runtime close to an interactive `claude` session: the same binary, local config, skills, MCP servers, hooks, and working directory semantics are used.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Telegram[Telegram user] -->|polling updates| Bot["Bot<br/>claude_telegram.bot"]
+    Bot -->|allowed_user_id + rate limit| Lock[per-chat asyncio.Lock]
+    Lock --> Runner["ClaudeRunner<br/>claude_telegram.runner"]
+    Runner -->|claude -p / stream-json / resume| Claude[claude CLI subprocess]
+    Claude -->|stdout JSON lines| Runner
+    Runner -->|normalized events| Renderer["StreamRenderer<br/>claude_telegram.stream"]
+    Renderer -->|throttled message edits| Telegram
+    Bot <-->|session_id + cwd| State["state.json<br/>StateStore"]
+    Bot --> Log["log.jsonl<br/>JsonlLogger"]
+
+    Cron[cron/scripts] -->|tg-push CLI| Push["localhost /push<br/>claude_telegram.push"]
+    Push -->|Bearer token| Bot
+```
+
+## Engineering highlights
+
+- **Authentication boundary:** Telegram messages are ignored unless `effective_user.id` matches `ALLOWED_USER_ID`; the push endpoint validates a bearer token with `hmac.compare_digest` and defaults to `127.0.0.1:8787`.
+- **Subprocess streaming:** each Claude turn starts `claude -p ... --output-format stream-json --verbose --dangerously-skip-permissions`, normalizes session/text/tool/result/error events, drains stderr concurrently, keeps a bounded stderr tail, and surfaces non-zero exits as stream errors.
+- **Concurrency and cancellation:** each chat has an `asyncio.Lock`, each turn receives a fresh `ClaudeRunner`, and `/stop` terminates only the current runner for that chat.
+- **Secret-safe logging:** application logging raises `httpx` to `WARNING` so Telegram request URLs do not write the bot token to the journal; the JSONL event log records operational events and may include inbound message text.
+- **Tests and CI:** pytest covers auth, commands, state persistence, rate limiting, push auth/chunking, renderer streaming, runner subprocess/error cleanup, per-chat cancellation, logging configuration, and the `tg-push` CLI. GitHub Actions installs `requirements-dev.txt` on Python 3.12 and runs `pytest`.
 
 ## Requirements
 
