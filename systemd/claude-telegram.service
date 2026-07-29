@@ -8,7 +8,12 @@ StartLimitIntervalSec=0
 Type=simple
 EnvironmentFile=%h/.claude-telegram/env
 WorkingDirectory=%h/claude-telegram
+# network-online.target only promises a link, not working resolution, so at boot
+# the first get_me() can die on NXDOMAIN. Wait for DNS before starting; give up
+# after ~60s and start anyway, since Restart= still covers a longer outage.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts api.telegram.org >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
 ExecStart=%h/claude-telegram/.venv/bin/python -m claude_telegram
+TimeoutStartSec=120
 Restart=on-failure
 RestartSec=5
 

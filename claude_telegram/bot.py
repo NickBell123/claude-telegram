@@ -1,6 +1,6 @@
 import asyncio
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from telegram import Update
@@ -10,7 +10,7 @@ from telegram.ext import Application, ApplicationBuilder, ContextTypes, MessageH
 from claude_telegram.config import Config
 from claude_telegram.log import JsonlLogger
 from claude_telegram.ratelimit import SlidingWindowLimiter
-from claude_telegram.runner import ClaudeRunner
+from claude_telegram.runner import ClaudeRunner, RunnerEvent
 from claude_telegram.state import StateStore
 from claude_telegram.stream import MessageSink, StreamRenderer
 
@@ -40,6 +40,30 @@ def parse_command(text: str) -> tuple[Optional[str], str]:
 @dataclass
 class LastTurn:
     cost: float | None = None
+
+
+# The CLI refuses --resume for a session it no longer has on disk. The stored
+# session id then poisons every subsequent turn, so treat it as recoverable.
+STALE_SESSION_MARKER = "No conversation found with session ID"
+
+
+def is_stale_session_error(ev: RunnerEvent) -> bool:
+    return ev.kind == "error" and STALE_SESSION_MARKER in str(ev.data.get("stderr", ""))
+
+
+@dataclass
+class _Attempt:
+    """What one pass over the runner produced."""
+
+    captured_session: str | None
+    cost: float | None = None
+    exception: Exception | None = None
+    errors: list[RunnerEvent] = field(default_factory=list)
+    produced_output: bool = False
+
+    @property
+    def stale_session(self) -> bool:
+        return any(is_stale_session_error(e) for e in self.errors)
 
 
 class TelegramSink(MessageSink):
@@ -129,7 +153,15 @@ class Bot:
             if "\n" in arg or "\r" in arg:
                 await self.app.bot.send_message(chat_id=chat_id, text="send one command per message")
                 return
-            cwd = os.path.expanduser(arg)
+            # Resolve like a shell cd: relative to this chat's cwd, not to the
+            # process working directory. Validate before persisting — an
+            # unchecked path is written to state.json and then fails every
+            # later turn at subprocess spawn.
+            current = self.state.get(chat_id).cwd
+            cwd = os.path.abspath(os.path.join(current, os.path.expanduser(arg)))
+            if not os.path.isdir(cwd):
+                await self.app.bot.send_message(chat_id=chat_id, text=f"⚠️ not a directory: {cwd}")
+                return
             self.state.set_cwd(chat_id, cwd)
             await self.app.bot.send_message(chat_id=chat_id, text=f"📁 cwd set to {cwd}")
         elif cmd == "cwd":
@@ -158,43 +190,76 @@ class Bot:
             min_edit_interval_s=self.config.edit_min_interval_s,
         )
         await renderer.start_placeholder()
-        runner = self.runner_factory()
-        self._current_runner[chat_id] = runner
-        cost = None
-        captured_session = state.session_id
-        error: Exception | None = None
-        try:
-            async for ev in runner.run(prompt=text, session_id=state.session_id, cwd=state.cwd):
-                if ev.kind == "session" and ev.data.get("session_id"):
-                    captured_session = ev.data["session_id"]
-                if ev.kind == "result":
-                    cost = ev.data.get("cost_usd")
-                    if ev.data.get("session_id"):
-                        captured_session = ev.data["session_id"]
+
+        session_id = state.session_id
+        attempt = await self._stream_attempt(chat_id, renderer, text, session_id, state.cwd)
+        # One retry from a clean session when the CLI rejected a session id that
+        # no longer exists — but only while the user has seen nothing, so the
+        # retry cannot duplicate output that was already rendered.
+        if attempt.stale_session and session_id is not None and not attempt.produced_output:
+            self.logger.write("session_reset", chat_id=chat_id, details={"stale_session_id": session_id})
+            self.state.clear_session(chat_id)
+            session_id = None
+            attempt = await self._stream_attempt(chat_id, renderer, text, None, state.cwd)
+
+        error = attempt.exception
+        failed = error is not None or bool(attempt.errors)
+        if error is not None:
+            try:
+                await sink.send(f"⚠️ runner error: {type(error).__name__}: {error}")
+            except Exception:
+                pass
+        else:
+            for ev in attempt.errors:
                 await renderer.handle(ev)
-        except Exception as e:
-            error = e
-        finally:
-            self._current_runner.pop(chat_id, None)
-            if error is not None:
-                try:
-                    await sink.send(f"⚠️ runner error: {type(error).__name__}: {error}")
-                except Exception:
-                    pass
-            else:
-                try:
-                    await renderer.finalize()
-                except Exception:
-                    pass
-        if captured_session and captured_session != state.session_id:
+            try:
+                await renderer.finalize(ok=not failed)
+            except Exception:
+                pass
+
+        captured_session = attempt.captured_session
+        if captured_session and captured_session != self.state.get(chat_id).session_id:
             self.state.set_session(chat_id, captured_session)
-        self._last_turn[chat_id] = LastTurn(cost=cost)
+        self._last_turn[chat_id] = LastTurn(cost=attempt.cost)
         self.logger.write(
             "claude",
             chat_id=chat_id,
             details={
-                "cost_usd": cost,
+                "cost_usd": attempt.cost,
                 "session_id": captured_session,
                 "error": f"{type(error).__name__}: {error}" if error else None,
             },
         )
+
+    async def _stream_attempt(
+        self,
+        chat_id: str,
+        renderer: StreamRenderer,
+        text: str,
+        session_id: Optional[str],
+        cwd: str,
+    ) -> _Attempt:
+        """Run the prompt once, rendering as it goes. Error events are held back
+        so a recoverable failure can be retried without the user ever seeing it."""
+        runner = self.runner_factory()
+        self._current_runner[chat_id] = runner
+        out = _Attempt(captured_session=session_id)
+        try:
+            async for ev in runner.run(prompt=text, session_id=session_id, cwd=cwd):
+                if ev.kind == "session" and ev.data.get("session_id"):
+                    out.captured_session = ev.data["session_id"]
+                if ev.kind == "result":
+                    out.cost = ev.data.get("cost_usd")
+                    if ev.data.get("session_id"):
+                        out.captured_session = ev.data["session_id"]
+                if ev.kind == "error":
+                    out.errors.append(ev)
+                    continue
+                if ev.kind in ("text", "tool_use"):
+                    out.produced_output = True
+                await renderer.handle(ev)
+        except Exception as e:
+            out.exception = e
+        finally:
+            self._current_runner.pop(chat_id, None)
+        return out

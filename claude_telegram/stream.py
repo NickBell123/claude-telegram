@@ -56,10 +56,14 @@ class StreamRenderer:
         if self.now_fn() - self._last_edit_at >= self.min_edit_interval_s:
             await self._flush()
 
-    async def finalize(self) -> None:
-        suffix = "\n\n✅"
-        if self._final_cost is not None:
-            suffix += f" (${self._final_cost:.4f})"
+    async def finalize(self, ok: bool = True) -> None:
+        if ok:
+            suffix = "\n\n✅"
+            if self._final_cost is not None:
+                suffix += f" (${self._final_cost:.4f})"
+        else:
+            # A turn that errored must never carry a success tick.
+            suffix = "\n\n❌"
         self._current_text += suffix
         await self._flush()
 
@@ -86,5 +90,7 @@ class StreamRenderer:
         if ev.kind == "tool_result":
             return ""  # too noisy to render; rely on next assistant text
         if ev.kind == "error":
-            return f"\n⚠️ error: {ev.data}\n"
+            # Prefer the child's own words; the raw event dict is noise on a phone.
+            detail = ev.data.get("stderr") or ev.data.get("raw") or ev.data
+            return f"\n⚠️ error: {str(detail).strip()}\n"
         return ""
