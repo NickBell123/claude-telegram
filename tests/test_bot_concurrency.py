@@ -16,6 +16,7 @@ FAKE_TOKEN = "123456:AAHfakefakefakefakefakefakefakefake"
 class FakeBotApi:
     def __init__(self):
         self.sent: list[tuple[str, str]] = []
+        self.actions: list[tuple[str, str]] = []
         self._id = 0
 
     async def send_message(self, chat_id: str, text: str):
@@ -25,6 +26,9 @@ class FakeBotApi:
 
     async def edit_message_text(self, chat_id: str, message_id: int, text: str) -> None:
         return None
+
+    async def send_chat_action(self, chat_id: str, action: str) -> None:
+        self.actions.append((chat_id, action))
 
 
 class FakeApp:

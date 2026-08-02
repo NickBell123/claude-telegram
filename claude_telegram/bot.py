@@ -4,11 +4,11 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from telegram import Update
-from telegram.constants import ChatAction
 from telegram.ext import Application, ApplicationBuilder, ContextTypes, MessageHandler, filters
 
 from claude_telegram.config import Config
 from claude_telegram.log import JsonlLogger
+from claude_telegram.presence import typing_action
 from claude_telegram.ratelimit import SlidingWindowLimiter
 from claude_telegram.runner import ClaudeRunner, RunnerEvent
 from claude_telegram.state import StateStore
@@ -182,6 +182,11 @@ class Bot:
                 await self.app.bot.send_message(chat_id=chat_id, text="nothing running")
 
     async def _run_turn(self, chat_id: str, text: str) -> None:
+        """Hold Telegram's typing action for the whole turn; the work lives in _generate."""
+        async with typing_action(self.app.bot, chat_id):
+            await self._generate(chat_id, text)
+
+    async def _generate(self, chat_id: str, text: str) -> None:
         state = self.state.get(chat_id)
         sink = TelegramSink(self.app, chat_id)
         renderer = StreamRenderer(
