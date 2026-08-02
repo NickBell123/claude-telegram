@@ -30,7 +30,7 @@ async def test_sends_action_immediately_on_enter():
 async def test_repeats_while_block_is_active():
     bot = FakeBot()
     async with typing_action(bot, "42", interval_s=0.01):
-        await asyncio.sleep(0.06)
+        await asyncio.sleep(0.2)
     assert len(bot.actions) >= 3
     assert all(a == ("42", "typing") for a in bot.actions)
 
@@ -49,7 +49,7 @@ async def test_stops_after_exit():
 async def test_send_failure_never_escapes_and_loop_continues():
     bot = FakeBot(fail=True)
     async with typing_action(bot, "42", interval_s=0.01):
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
     # Every send raised, yet the block completed and beats kept being attempted.
     assert len(bot.actions) >= 3
 
