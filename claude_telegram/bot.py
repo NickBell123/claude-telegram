@@ -107,8 +107,8 @@ class Bot:
         self.app: Application = ApplicationBuilder().token(config.telegram_bot_token).build()
         self.app.add_handler(MessageHandler(filters.TEXT, self._on_message))
 
-    async def send(self, chat_id: str, text: str) -> int:
-        msg = await self.app.bot.send_message(chat_id=chat_id, text=text)
+    async def send(self, chat_id: str, text: str, parse_mode: Optional[str] = None) -> int:
+        msg = await self.app.bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)
         return msg.message_id
 
     def _lock_for(self, chat_id: str) -> asyncio.Lock:

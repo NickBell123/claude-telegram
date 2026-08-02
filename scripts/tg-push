@@ -10,6 +10,7 @@ Usage:
   tg-push --chat-id 9999 "inline text"
 """
 import argparse
+import html
 import os
 import sys
 import urllib.request
@@ -36,6 +37,11 @@ def main() -> int:
     parser.add_argument("--title", help="optional title prepended as a bolded line")
     parser.add_argument("--file", help="read text from file")
     parser.add_argument("--chat-id", help="override default chat id")
+    parser.add_argument(
+        "--parse-mode",
+        choices=["MarkdownV2", "HTML", "Markdown"],
+        help="send pre-formatted text; you own escaping it correctly",
+    )
     args = parser.parse_args()
 
     env_path = Path(os.environ.get("TG_PUSH_ENV_FILE", os.path.expanduser("~/.claude-telegram/env")))
@@ -52,12 +58,24 @@ def main() -> int:
         body = args.text
     else:
         body = sys.stdin.read()
-    if args.title:
-        body = f"*{args.title}*\n\n{body}"
+    parse_mode = args.parse_mode
+    if parse_mode:
+        # Caller sent their own markup; prepend the title raw and escape nothing.
+        if args.title:
+            body = f"{args.title}\n\n{body}"
+    elif args.title:
+        # Bold the title without risking the body. HTML needs only three
+        # characters escaped, so arbitrary generated text survives it intact —
+        # MarkdownV2 would make Telegram reject any brief containing a bare
+        # '.', '-' or '(', turning a cosmetic nicety into a dropped alert.
+        parse_mode = "HTML"
+        body = f"<b>{html.escape(args.title)}</b>\n\n{html.escape(body)}"
 
     payload = {"text": body}
     if args.chat_id:
         payload["chat_id"] = args.chat_id
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
 
     req = urllib.request.Request(
         url,

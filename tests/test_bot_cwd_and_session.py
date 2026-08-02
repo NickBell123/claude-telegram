@@ -20,9 +20,11 @@ class FakeBotApi:
         self.sent: list[tuple[str, str]] = []
         self.edits: list[tuple[int, str]] = []
         self.actions: list[tuple[str, str]] = []
+        self.modes: list[str | None] = []
         self._id = 0
 
-    async def send_message(self, chat_id: str, text: str):
+    async def send_message(self, chat_id: str, text: str, parse_mode: str | None = None):
+        self.modes.append(parse_mode)
         self._id += 1
         self.sent.append((chat_id, text))
         return type("Msg", (), {"message_id": self._id})()
@@ -286,3 +288,12 @@ async def test_cwd_command_sends_no_typing_action(tmp_path: Path):
     bot = _build_bot(tmp_path, [])
     await bot._handle_command("42", "cwd", "")
     assert bot.app.bot.actions == []
+
+
+@pytest.mark.asyncio
+async def test_bot_send_forwards_parse_mode_to_telegram(tmp_path: Path):
+    # The push endpoint reaches Telegram through here; a signature mismatch on
+    # this seam only shows up at runtime.
+    bot = _build_bot(tmp_path, [])
+    await bot.send("42", "*hi*", "MarkdownV2")
+    assert bot.app.bot.modes == ["MarkdownV2"]

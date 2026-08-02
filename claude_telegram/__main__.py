@@ -37,8 +37,8 @@ async def _main() -> None:
         limiter=limiter,
     )
 
-    async def push_send(chat_id: str, text: str) -> int:
-        return await bot.send(chat_id, text)
+    async def push_send(chat_id: str, text: str, parse_mode: str | None = None) -> int:
+        return await bot.send(chat_id, text, parse_mode)
 
     push_app = build_app(
         push_token=cfg.push_token,
