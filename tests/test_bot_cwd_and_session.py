@@ -19,6 +19,7 @@ class FakeBotApi:
     def __init__(self):
         self.sent: list[tuple[str, str]] = []
         self.edits: list[tuple[int, str]] = []
+        self.actions: list[tuple[str, str]] = []
         self._id = 0
 
     async def send_message(self, chat_id: str, text: str):
@@ -28,6 +29,9 @@ class FakeBotApi:
 
     async def edit_message_text(self, chat_id: str, message_id: int, text: str) -> None:
         self.edits.append((message_id, text))
+
+    async def send_chat_action(self, chat_id: str, action: str) -> None:
+        self.actions.append((chat_id, action))
 
 
 class FakeApp:
@@ -267,3 +271,18 @@ async def test_runner_error_renders_stderr_not_a_raw_dict(tmp_path: Path):
     seen = _transcript(bot)
     assert "boom: it broke" in seen
     assert "'returncode'" not in seen, "should not dump the raw event dict"
+
+
+@pytest.mark.asyncio
+async def test_turn_shows_typing_action(tmp_path: Path):
+    runner = ScriptedRunner([RunnerEvent("text", {"text": "hi"})])
+    bot = _build_bot(tmp_path, [runner])
+    await bot._run_turn("42", "hello")
+    assert ("42", "typing") in bot.app.bot.actions
+
+
+@pytest.mark.asyncio
+async def test_cwd_command_sends_no_typing_action(tmp_path: Path):
+    bot = _build_bot(tmp_path, [])
+    await bot._handle_command("42", "cwd", "")
+    assert bot.app.bot.actions == []
