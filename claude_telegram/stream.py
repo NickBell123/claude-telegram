@@ -6,7 +6,7 @@ from claude_telegram.runner import RunnerEvent
 
 class MessageSink(Protocol):
     async def send(self, text: str) -> int: ...
-    async def edit(self, message_id: int, text: str) -> None: ...
+    async def edit(self, message_id: int, text: str, finalize: bool = False) -> None: ...
 
 
 PLACEHOLDER = "⚡ thinking…"
@@ -47,7 +47,9 @@ class StreamRenderer:
             return
         # If adding would overflow, finalize current message and start a fresh one.
         if len(self._current_text) + len(addition) > self.max_chars:
-            await self._flush()
+            # This message is about to be replaced, so it will never be edited
+            # again — that makes this its final render, not an interim one.
+            await self._flush(finalize=True)
             self._current_msg_id = await self.sink.send(PLACEHOLDER)
             self._current_text = ""
             self._last_edit_at = self.now_fn()
@@ -65,14 +67,18 @@ class StreamRenderer:
             # A turn that errored must never carry a success tick.
             suffix = "\n\n❌"
         self._current_text += suffix
-        await self._flush()
+        await self._flush(finalize=True)
 
-    async def _flush(self) -> None:
-        """Write the buffer to Telegram. Callers decide when; throttling lives at the call site."""
+    async def _flush(self, finalize: bool = False) -> None:
+        """Write the buffer to Telegram. Callers decide when; throttling lives at the call site.
+
+        `finalize` marks a render the sink will never revise, which is the
+        sink's cue to apply formatting — see TelegramSink.edit.
+        """
         if self._current_msg_id is None:
             return
         text = self._current_text or PLACEHOLDER
-        await self.sink.edit(self._current_msg_id, text)
+        await self.sink.edit(self._current_msg_id, text, finalize=finalize)
         self._last_edit_at = self.now_fn()
 
     def _format(self, ev: RunnerEvent) -> str:

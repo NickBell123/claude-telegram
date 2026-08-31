@@ -13,7 +13,7 @@ class FakeSink(MessageSink):
         self.calls.append(("send", self._next_id, text))
         return self._next_id
 
-    async def edit(self, message_id: int, text: str) -> None:
+    async def edit(self, message_id: int, text: str, finalize: bool = False) -> None:
         self.calls.append(("edit", message_id, text))
 
 
@@ -79,3 +79,50 @@ async def test_respects_min_edit_interval():
     await r.finalize()
     edits = [c for c in sink.calls if c[0] == "edit"]
     assert len(edits) >= 1
+
+
+class FinalizeSink(MessageSink):
+    """Records whether each edit asked for the formatted, final render."""
+
+    def __init__(self):
+        self.edits: list[tuple[str, bool]] = []
+        self._next_id = 200
+
+    async def send(self, text: str) -> int:
+        self._next_id += 1
+        return self._next_id
+
+    async def edit(self, message_id: int, text: str, finalize: bool = False) -> None:
+        self.edits.append((text, finalize))
+
+
+@pytest.mark.asyncio
+async def test_finalize_requests_the_formatted_edit():
+    sink = FinalizeSink()
+    r = StreamRenderer(sink, now_fn=lambda: 0.0)
+    await r.start_placeholder()
+    await r.handle(RunnerEvent(kind="text", data={"text": "**hi**"}))
+    await r.finalize(ok=True)
+    assert sink.edits[-1][1] is True, "the last edit of a turn must be formatted"
+
+
+@pytest.mark.asyncio
+async def test_mid_stream_edits_are_not_finalized():
+    sink = FinalizeSink()
+    clock = iter([0.0, 99.0, 99.0, 99.0, 99.0])
+    r = StreamRenderer(sink, now_fn=lambda: next(clock))
+    await r.start_placeholder()
+    await r.handle(RunnerEvent(kind="text", data={"text": "partial **bo"}))
+    assert sink.edits, "expected a throttled mid-stream edit"
+    assert all(f is False for _, f in sink.edits)
+
+
+@pytest.mark.asyncio
+async def test_overflow_finalizes_the_message_it_is_leaving_behind():
+    # A message replaced by overflow is never edited again, so it is final.
+    sink = FinalizeSink()
+    r = StreamRenderer(sink, max_chars=20, now_fn=lambda: 0.0)
+    await r.start_placeholder()
+    await r.handle(RunnerEvent(kind="text", data={"text": "x" * 15}))
+    await r.handle(RunnerEvent(kind="text", data={"text": "y" * 15}))
+    assert sink.edits[0][1] is True
