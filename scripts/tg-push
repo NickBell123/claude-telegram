@@ -10,7 +10,6 @@ Usage:
   tg-push --chat-id 9999 "inline text"
 """
 import argparse
-import html
 import os
 import sys
 import urllib.request
@@ -42,6 +41,11 @@ def main() -> int:
         choices=["MarkdownV2", "HTML", "Markdown"],
         help="send pre-formatted text; you own escaping it correctly",
     )
+    parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="body is ordinary markdown; the bridge renders it (implied by --title)",
+    )
     args = parser.parse_args()
 
     env_path = Path(os.environ.get("TG_PUSH_ENV_FILE", os.path.expanduser("~/.claude-telegram/env")))
@@ -59,23 +63,32 @@ def main() -> int:
     else:
         body = sys.stdin.read()
     parse_mode = args.parse_mode
+    markdown = False
     if parse_mode:
         # Caller sent their own markup; prepend the title raw and escape nothing.
         if args.title:
             body = f"{args.title}\n\n{body}"
-    elif args.title:
-        # Bold the title without risking the body. HTML needs only three
-        # characters escaped, so arbitrary generated text survives it intact —
-        # MarkdownV2 would make Telegram reject any brief containing a bare
-        # '.', '-' or '(', turning a cosmetic nicety into a dropped alert.
-        parse_mode = "HTML"
-        body = f"<b>{html.escape(args.title)}</b>\n\n{html.escape(body)}"
+    elif args.title or args.markdown:
+        # The bodies that arrive here are LLM-written markdown briefs. Escaping
+        # them as HTML delivered every '**bold**' to the reader as literal
+        # asterisks, so hand the raw markdown to the bridge instead and let it
+        # convert — it has the tested markdown -> MarkdownV2 converter, and
+        # doing it there keeps one implementation rather than reimplementing
+        # MarkdownV2's 18 reserved characters in this script.
+        markdown = True
 
     payload = {"text": body}
     if args.chat_id:
         payload["chat_id"] = args.chat_id
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if markdown:
+        payload["markdown"] = True
+        # The bridge bolds the title itself. Prepending it here would hide a
+        # model's whole-message ```markdown wrapper behind a title line, and
+        # the bridge could no longer recognise and strip it.
+        if args.title:
+            payload["title"] = args.title
 
     req = urllib.request.Request(
         url,

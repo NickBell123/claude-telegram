@@ -93,6 +93,21 @@ def to_markdown_v2(text: str) -> str:
     return text
 
 
+# A fence tagged as markdown that encloses the entire message. Generators
+# routinely wrap a whole brief in one; taken at face value it renders the alert
+# as a single monospace block with every '**' marker showing. Only this exact
+# shape is unwrapped — a fence tagged with a real language, or one that is just
+# part of a larger message, is genuine content.
+_WHOLE_MESSAGE_MD_FENCE_RE = re.compile(
+    r"\A\s*```(?:markdown|md)[ \t]*\r?\n([\s\S]*?)\r?\n?```\s*\Z", re.IGNORECASE)
+
+
+def unwrap_outer_markdown_fence(text: str) -> str:
+    """Drop a ```markdown fence wrapped around the whole message, if present."""
+    m = _WHOLE_MESSAGE_MD_FENCE_RE.match(text or "")
+    return m.group(1) if m else text
+
+
 def strip_markers(text: str) -> str:
     """Reduce MarkdownV2 back to clean plain text for the fallback path.
 
