@@ -8,6 +8,9 @@ import socketserver
 import threading
 import json
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from claude_telegram.richtext import to_markdown_v2  # noqa: E402
+
 
 def _start_capture_server(port: int) -> tuple[socketserver.TCPServer, list[dict]]:
     captured: list[dict] = []
@@ -82,16 +85,27 @@ def _run_cli(tmp_path: Path, args: list[str], stdin: str) -> dict:
 
 
 def test_title_is_sent_as_real_bold_not_literal_asterisks(tmp_path: Path):
+    # End-to-end intent: what the reader sees has the title in real bold and
+    # no stray asterisks. The CLI hands over markdown; the bridge converts it,
+    # so check the title through that same converter.
     body = _run_cli(tmp_path, ["--title", "Morning brief"], "BTC up")
-    assert body["parse_mode"] == "HTML"
-    assert body["text"].startswith("<b>Morning brief</b>")
-    assert "*" not in body["text"]
+    assert body["markdown"] is True
+    assert body["title"] == "Morning brief"
+    assert "**" not in to_markdown_v2(body["text"])
 
 
-def test_title_mode_escapes_markup_in_the_body(tmp_path: Path):
-    # A generated brief containing < or & must not be read as markup.
+def test_title_mode_leaves_angle_brackets_and_ampersands_intact(tmp_path: Path):
+    # These were HTML-escaped when the body was sent as HTML. MarkdownV2 gives
+    # them no meaning, so they must reach the reader exactly as written.
     body = _run_cli(tmp_path, ["--title", "T"], "profit <10% & rising")
-    assert "profit &lt;10% &amp; rising" in body["text"]
+    assert "profit <10% & rising" in to_markdown_v2(body["text"])
+
+
+def test_title_is_sent_as_a_field_not_folded_into_the_body(tmp_path: Path):
+    # Folding it in would mask a model's whole-message ```markdown wrapper.
+    body = _run_cli(tmp_path, ["--title", "T"], "```markdown\n**x**\n```")
+    assert body["text"].startswith("```markdown")
+    assert body["title"] == "T"
 
 
 def test_explicit_parse_mode_is_passed_through_unescaped(tmp_path: Path):
@@ -104,3 +118,31 @@ def test_plain_push_still_sends_no_parse_mode(tmp_path: Path):
     body = _run_cli(tmp_path, [], "just text")
     assert "parse_mode" not in body
     assert body["text"] == "just text"
+
+
+def test_title_mode_asks_the_server_to_render_markdown(tmp_path: Path):
+    # The generated briefs are markdown. HTML-escaping them delivered literal
+    # '**' to the reader; the body must instead be flagged for conversion.
+    body = _run_cli(tmp_path, ["--title", "Morning brief"], "**BTC** up 2.5%")
+    assert body["markdown"] is True
+    assert "parse_mode" not in body
+    assert "**BTC** up 2.5%" in body["text"]
+    assert "&lt;" not in body["text"]
+
+
+def test_title_is_bolded_as_markdown_for_the_converter(tmp_path: Path):
+    body = _run_cli(tmp_path, ["--title", "Morning brief"], "hi")
+    assert body["title"] == "Morning brief"
+    assert body["text"] == "hi"
+
+
+def test_markdown_flag_opts_a_titleless_push_into_conversion(tmp_path: Path):
+    body = _run_cli(tmp_path, ["--markdown"], "**loud**")
+    assert body["markdown"] is True
+    assert body["text"] == "**loud**"
+
+
+def test_explicit_parse_mode_still_bypasses_conversion(tmp_path: Path):
+    body = _run_cli(tmp_path, ["--parse-mode", "HTML", "--title", "T"], "<b>x</b>")
+    assert body["parse_mode"] == "HTML"
+    assert "markdown" not in body

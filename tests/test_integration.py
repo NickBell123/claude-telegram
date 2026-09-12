@@ -19,7 +19,7 @@ class FakeSink(MessageSink):
         self.calls.append(("send", self._id, text))
         return self._id
 
-    async def edit(self, message_id: int, text: str) -> None:
+    async def edit(self, message_id: int, text: str, finalize: bool = False) -> None:
         self.calls.append(("edit", message_id, text))
 
 

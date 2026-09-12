@@ -6,6 +6,10 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+# Claude Code's Bash tool needs the user runtime and D-Bus socket to run
+# `systemctl --user`, including when this bridge starts before login.
+Environment=XDG_RUNTIME_DIR=%t
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
 EnvironmentFile=%h/.claude-telegram/env
 WorkingDirectory=%h/claude-telegram
 # network-online.target only promises a link, not working resolution, so at boot

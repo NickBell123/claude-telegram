@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -12,6 +13,7 @@ from claude_telegram.presence import typing_action
 from claude_telegram.ratelimit import SlidingWindowLimiter
 from claude_telegram.runner import ClaudeRunner, RunnerEvent
 from claude_telegram.state import StateStore
+from claude_telegram.richtext import strip_markers, to_markdown_v2
 from claude_telegram.stream import MessageSink, StreamRenderer
 
 KNOWN_COMMANDS = {"reset", "cd", "cwd", "cost", "stop"}
@@ -66,6 +68,12 @@ class _Attempt:
         return any(is_stale_session_error(e) for e in self.errors)
 
 
+logger = logging.getLogger(__name__)
+
+# Telegram rejects any message longer than this, formatted length included.
+TELEGRAM_MAX_CHARS = 4096
+
+
 class TelegramSink(MessageSink):
     """MessageSink backed by python-telegram-bot."""
 
@@ -77,12 +85,47 @@ class TelegramSink(MessageSink):
         msg = await self.app.bot.send_message(chat_id=self.chat_id, text=text)
         return msg.message_id
 
-    async def edit(self, message_id: int, text: str) -> None:
+    async def edit(self, message_id: int, text: str, finalize: bool = False) -> None:
+        """Write text to the message. Only the finalize edit carries formatting.
+
+        Mid-stream buffers end at arbitrary points, so they routinely sit inside
+        an unclosed construct. MarkdownV2 rejects malformed markup outright and
+        a rejected edit is invisible — the message just stops updating — so
+        intermediate edits stay plain and the markup is applied once, at the
+        end. Same policy as the Hermes adapter's REQUIRES_EDIT_FINALIZE.
+        """
+        if not finalize:
+            try:
+                await self.app.bot.edit_message_text(
+                    chat_id=self.chat_id, message_id=message_id, text=text)
+            except Exception:
+                # Edits can fail on identical text or rate limits; ignore.
+                pass
+            return
+
+        formatted = to_markdown_v2(text)
+        # Escaping inflates the text, so a buffer sized against the renderer's
+        # raw cap can cross Telegram's limit once formatted. Sending it would
+        # spend an API call — and flood budget — on a certain rejection.
+        if len(formatted) <= TELEGRAM_MAX_CHARS:
+            try:
+                await self.app.bot.edit_message_text(
+                    chat_id=self.chat_id, message_id=message_id,
+                    text=formatted, parse_mode="MarkdownV2")
+                return
+            except Exception as exc:
+                # Telegram rejected the markup. Fall through and deliver the
+                # answer unformatted rather than freezing the message.
+                logger.warning("formatted edit rejected, retrying plain: %s", exc)
         try:
-            await self.app.bot.edit_message_text(chat_id=self.chat_id, message_id=message_id, text=text)
-        except Exception:
-            # Edits can fail on identical text or rate limits; ignore.
-            pass
+            await self.app.bot.edit_message_text(
+                chat_id=self.chat_id, message_id=message_id,
+                text=strip_markers(formatted)[:TELEGRAM_MAX_CHARS])
+        except Exception as exc:
+            # Both attempts failed. The reader is now stuck on whatever the last
+            # successful edit showed — possibly still the placeholder — so this
+            # must never be silent.
+            logger.warning("final edit failed, message may be stale: %s", exc)
 
 
 class Bot:
